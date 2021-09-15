@@ -27,6 +27,10 @@
 
 #include "Joystick.h"
 
+// Conditional build options
+#define ENC_PORT_READ       // How we want the encoder to be read
+#undef SERIAL_DEBUG         // If we want serial debugging 
+
 // Create Joystick
 Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
   8, 0,                     // Button count, Hat Switch count
@@ -35,9 +39,9 @@ Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
   false, true,              // Rudder, throttle
   false, false, false);     // Accelerator, brake, steering
 
-// Debug mode
-const bool debug = false;   // === IMPORTANT ===
+#ifdef SERIAL_DEBUG
 byte debugEncDirection = 0;
+#endif
 
 // Loop timings
 //
@@ -63,14 +67,19 @@ unsigned long flapBounceTmr = 0;
 const byte potPin1 = A0;    // input pin for the potentiometer
 const byte potPin2 = A1;    // input pin for the potentiometer
 const byte potPin3 = A2;    // input pin for the potentiometer
-const byte encPin1 = 9;     // rotary encoder input 1 for elevator trim
-const byte encPin2 = 10;    // rotary encoder input 2 for elevator trim
-#define encPort PINB        // rotary encoder port useed - both pins!
-const byte encShift = 5;    // number of positions to shift right
 const byte revPin = 4;      // reverse thrust input
 const byte gearPin = 5;     // gear lever input
 const byte flapPin1 = 6;    // flaps input 1
 const byte flapPin2 = 7;    // flaps input 2
+#ifdef ENC_PORT_READ
+#define encPort PINB        // rotary encoder port useed - both pins!
+const byte encPin1 = 9;     // rotary encoder input 1 for elevator trim
+const byte encPin2 = 10;    // rotary encoder input 2 for elevator trim
+const byte encShift = 5;    // number of positions to shift right
+#else
+const byte encPin1 = 9;     // rotary encoder input 1 for elevator trim
+const byte encPin2 = 10;    // rotary encoder input 2 for elevator trim
+#endif
 
 // Joystick button assignment
 const byte joyEncUp = 0;
@@ -120,7 +129,9 @@ void setup() {
   Joystick.begin();
 
   // Initialize serial debugging
+  #ifdef SERIAL_DEBUG
   if (debug) { Serial.begin(9600); }
+  #endif
 }
 
 void loop() {
@@ -172,14 +183,16 @@ void loop() {
   //    byte encReadVal = (digitalRead(encPin2)  << 1)| (digitalRead(encPin2) ^ digitalRead(encPin1));
   //
   // Start by reading the encoder pin states into a two bit value
-  //
-  // Read each pin using digitalRead:
-  //    byte encReadVal = (digitalRead(encPin2)  << 1) | digitalRead(encPin1);
-  //
+
+#ifdef ENC_PORT_READ
   // Read port and extract pin values. REQUIRES that both pins are adjacent
   // on the same port. I.e. on Arduino Leonardo and *uino32u4 this would be
   // D9 & D19 for PB5 & PB6 respectively.
   byte encReadVal = (encPort >> encShift) & 0b00000011;
+#else
+  // Read each pin using digitalRead:
+  byte encReadVal = (digitalRead(encPin2)  << 1) | digitalRead(encPin1);
+#endif
 
   // Arm debounce timer on pin change detected AND inactive button send
   if (!encArmFlag && encReadVal != encLastVal) {
@@ -219,7 +232,10 @@ void loop() {
       //   1 1 1 0      
       //
       byte encDirection = (encReadVal << 2 ) | encLastVal;
-      if (debug) { debugEncDirection = encDirection; }
+      #ifdef SERIAL_DEBUG
+      debugEncDirection = encDirection; }
+      #endif
+
       if (encDirection == 0b0010 ||
           encDirection == 0b0100 ||
           encDirection == 0b1101 ||
@@ -366,39 +382,18 @@ void loop() {
     flapArmFlag = false;
   }
 
-
   // Debug printing
-  if (debug) {
-    if (millis() - debugTmr > debugPeriod) {
-      char buffer[80];
-      sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %3u %3u -- Flaps: %4u", 
-        potLastVal1, potLastVal2, potLastVal3, 
-        encReadVal, debugEncDirection, flapReadVal);
-      Serial.println(buffer);
-      debugTmr = millis();
-    }
+#ifdef SERIAL_DEBUG
+  if (millis() - debugTmr > debugPeriod) {
+    char buffer[80];
+    sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %3u %3u -- Flaps: %4u", 
+      potLastVal1, potLastVal2, potLastVal3, 
+      encReadVal, debugEncDirection, flapReadVal);
+    Serial.println(buffer);
+    debugTmr = millis();
   }
+#endif
 }
-
-// // Press joystick "up" button in response to encoder input
-// void encUp() {
-//   if (!encArmFlag) {
-//     Joystick.setButton(joyEncUp,1);
-//     encArmFlag = true;
-//     encUpTmr = millis();
-//     debugEncClicks++;
-//   }
-// }
-// 
-// // Press joystick "down" button in response to encoder input
-// void encDown() {
-//   if (!encArmFlag) {
-//     Joystick.setButton(joyEncDn,1);
-//     encArmFlagDn = true;
-//     encDnTmr = millis();
-//     debugEncClicks--;
-//   }
-// }
 
 // We have received non-linear slider pots, this corrects the B5 logarithmic
 // taper to some approximation of linear.
