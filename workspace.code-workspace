@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "..\\Test"
+		},
+		{
+			"path": "io-port-dump"
+		},
+		{
+			"path": "throttle-quadrant-breadbox"
+		}
+	],
+	"settings": {}
+}
