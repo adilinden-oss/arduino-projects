@@ -36,7 +36,7 @@ Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
   false, false, false);     // Accelerator, brake, steering
 
 // Debug mode
-const bool debug = false;   // === IMPORTANT ===
+const bool debug = true;   // === IMPORTANT ===
 byte debugEncDirection = 0;
 
 // Loop timings
@@ -60,15 +60,18 @@ unsigned long gearBounceTmr = 0;
 unsigned long flapBounceTmr = 0;
 
 // Arduino HW pin used
-const byte potPin1 = A0;  // input pin for the potentiometer
-const byte potPin2 = A1;  // input pin for the potentiometer
-const byte potPin3 = A2;  // input pin for the potentiometer
-const byte encPin1 = 9;   // rotary encoder input 1 for elevator trim
-const byte encPin2 = 10;  // rotary encoder input 2 for elevator trim
-const byte revPin = 4;    // reverse thrust input
-const byte gearPin = 5;   // gear lever input
-const byte flapPin1 = 6;  // flaps input 1
-const byte flapPin2 = 7;  // flaps input 2
+const byte potPin1 = A0;    // input pin for the potentiometer
+const byte potPin2 = A1;    // input pin for the potentiometer
+const byte potPin3 = A2;    // input pin for the potentiometer
+const byte encPin1 = 9;     // rotary encoder input 1 for elevator trim
+const byte encPin2 = 10;    // rotary encoder input 2 for elevator trim
+#define encPort PINB        // rotary encoder port useed - both pins!
+const byte encShift = 5;    // number of positions to shift right
+const byte encMask = 0b01100000;
+const byte revPin = 4;      // reverse thrust input
+const byte gearPin = 5;     // gear lever input
+const byte flapPin1 = 6;    // flaps input 1
+const byte flapPin2 = 7;    // flaps input 2
 
 // Joystick button assignment
 const byte joyEncUp = 0;
@@ -167,12 +170,18 @@ void loop() {
   //
   // For reference purposes, this converts the two bit gray code to
   // binary:
-  //
-  // byte encReadVal = (digitalRead(encPin1)  << 1)| (digitalRead(encPin1) ^ digitalRead(encPin2));
+  //    byte encReadVal = (digitalRead(encPin1)  << 1)| (digitalRead(encPin1) ^ digitalRead(encPin2));
   //
   // Start by reading the encoder pin states into a two bit value
-  // Note: Is there a better way to read both bits at once?
-  byte encReadVal = (digitalRead(encPin1)  << 1) | digitalRead(encPin2);
+  //
+  // Read each pin using digitalRead:
+  //    byte encReadVal = (digitalRead(encPin1)  << 1) | digitalRead(encPin2);
+  //
+  // Read port and extract pin values. REQUIRES that both pins are adjacent
+  // on the same port. I.e. on Arduino Leonardo and *uino32u4 this would be
+  // D9 & D19 for PB5 & PB6 respectively.
+  byte encReadVal = (encPort & encMask) >> encShift;
+
   // Arm debounce timer on pin change detected AND inactive button send
   if (!encArmFlag && encReadVal != encLastVal && !encButtonFlag) {
     encBounceTmr = millis();
@@ -203,12 +212,13 @@ void loop() {
       //      / / ,- last pin 1
       //     / / / ,- last pin 2
       //    / / / /
+      //   0 0 0 1
       //   1 0 0 0
-      //   0 0 0 1
-      //   0 1 1 1
       //   1 1 1 0
-      //   1 0 0 0 
+      //   1 0 0 1
       //   0 0 0 1
+      //   1 0 0 0 
+      //   0 1 1 0      
       //
       byte encDirection = (encReadVal << 2 ) | encLastVal;
       if (debug) { debugEncDirection = encDirection; }
@@ -346,9 +356,9 @@ void loop() {
   if (debug) {
     if (millis() - debugTmr > debugPeriod) {
       char buffer[80];
-      sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %u -- Flaps: %u", 
+      sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %3u %3u -- Flaps: %4u", 
         potLastVal1, potLastVal2, potLastVal3, 
-        debugEncDirection, flapReadVal);
+        encReadVal, debugEncDirection, flapReadVal);
       Serial.println(buffer);
       debugTmr = millis();
     }
