@@ -36,31 +36,35 @@ Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
   false, false, false);     // Accelerator, brake, steering
 
 // Debug mode
-const bool debug = true;   // === IMPORTANT ===
-unsigned int debugEncClicks = 0;
+const bool debug = false;   // === IMPORTANT ===
+byte debugEncDirection = 0;
 
 // Loop timings
+//
+// Note on the Joystick buttons, the encoder rotation triggers a Joystick
+// button press. On my Win10 machine 50ms was the lowest value that
+// appeared to be reliably detect the button inupt signal.
 const unsigned long debugPeriod = 200;
-const unsigned long potTriggerPeriod = 200;  // timer pot reading
-const unsigned long encTriggerPeriod = 75; // timer button is "pressed"
-const unsigned long butTriggerPeriod = 50;  // timer button is "pressed"
+const unsigned long potBouncePeriod = 200;  // debounce potentiometer read
+const unsigned long encBouncePeriod = 10;   // debounce encoder read
+const unsigned long encButtonPeriod = 50;   // hold time for joystick button press
+const unsigned long butBouncePeriod = 50;   // debounce button read
 unsigned long debugTmr = 0;
 unsigned long pot1Tmr = 0;
 unsigned long pot2Tmr = 0;
 unsigned long pot3Tmr = 0;
-unsigned long encUpTmr = 0;
-unsigned long encDnTmr = 0;
+unsigned long encBounceTmr = 0;
+unsigned long encButtonTmr = 0;
 unsigned long revBounceTmr = 0;
 unsigned long gearBounceTmr = 0;
 unsigned long flapBounceTmr = 0;
-unsigned long flapActiveTmr = 0;
 
 // Arduino HW pin used
 const byte potPin1 = A0;  // input pin for the potentiometer
 const byte potPin2 = A1;  // input pin for the potentiometer
 const byte potPin3 = A2;  // input pin for the potentiometer
-const byte encPinUp = 2;  // rotary encoder input 1 for elevator trim
-const byte encPinDn = 3;  // rotary encoder input 2 for elevator trim
+const byte encPin1 = 2;   // rotary encoder input 1 for elevator trim
+const byte encPin2 = 3;   // rotary encoder input 2 for elevator trim
 const byte revPin = 4;    // reverse thrust input
 const byte gearPin = 5;   // gear lever input
 const byte flapPin1 = 6;  // flaps input 1
@@ -81,15 +85,14 @@ int potLastVal2 = 2048;
 int potLastVal3 = 2048;
 
 // Rotary encoder values
-byte encLastValUp = 255;
-byte encLastValDn = 255;
-bool encTriggerUp = false;  // encoder triggered up
-bool encTriggerDn = false;  // encoder triggered up
+bool encArmFlag = false;  // tracks active encoder inout change
+byte encButtonFlag = 0;   // tracks active Joystick button send
+byte encLastVal = 255;
 
 // Button values
-bool revTrigger = false;
-bool gearTrigger = false;
-bool flapTrigger = false;
+bool revArmFlag = false;
+bool gearArmFlag = false;
+bool flapArmFlag = false;
 byte revLastVal = 255;
 byte gearLastVal = 255;
 byte flapLastVal = 255;
@@ -99,8 +102,8 @@ void setup() {
   pinMode(potPin1, INPUT);
   pinMode(potPin2, INPUT);
   pinMode(potPin3, INPUT);
-  pinMode(encPinUp, INPUT_PULLUP);
-  pinMode(encPinDn, INPUT_PULLUP);
+  pinMode(encPin1, INPUT_PULLUP);
+  pinMode(encPin2, INPUT_PULLUP);
   pinMode(revPin, INPUT_PULLUP);
   pinMode(gearPin, INPUT_PULLUP);
   pinMode(flapPin1, INPUT_PULLUP);
@@ -114,6 +117,7 @@ void setup() {
   // Initialize joystick
   Joystick.begin();
 
+  // Initialize serial debugging
   if (debug) { Serial.begin(9600); }
 }
 
@@ -123,86 +127,137 @@ void loop() {
 
   // Read and update potentiometers periodically
   potReadVal = correctTaper(analogRead(potPin1));
-  if (potReadVal != potLastVal1 && (millis() - pot1Tmr > potTriggerPeriod)) {
+  if (potReadVal != potLastVal1 && (millis() - pot1Tmr > potBouncePeriod)) {
     Joystick.setThrottle(potReadVal);
     potLastVal1 = potReadVal;
   }
   potReadVal = correctTaper(analogRead(potPin2));
-  if (potReadVal != potLastVal2 && (millis() - pot2Tmr > potTriggerPeriod)) {
+  if (potReadVal != potLastVal2 && (millis() - pot2Tmr > potBouncePeriod)) {
     Joystick.setRxAxis(potReadVal);
     potLastVal2 = potReadVal;
   }
   potReadVal = correctTaper(analogRead(potPin3));
-  if (potReadVal != potLastVal3 && (millis() - pot3Tmr > potTriggerPeriod)) {
+  if (potReadVal != potLastVal3 && (millis() - pot3Tmr > potBouncePeriod)) {
     Joystick.setRyAxis(potReadVal);
     potLastVal3 = potReadVal;
   }
 
-  // Read encoder
-  byte encUpReadVal = digitalRead(encPinUp);
-  byte encDnReadVal = digitalRead(encPinDn);
-
-  // Handle encoder input
-  if (encLastValUp && !encUpReadVal) {
-    // A dropped
-    if (encDnReadVal) {
-      // A drop & B high = down
-      encDown();
-    } else {
-      // A drop & B low = up
-      encUp();      
+  // Handle elevator trim rotary encoder
+  //
+  // The two bit gray code from the encoder looks as follows:
+  //       ,- pin1
+  //      / ,- pin 2
+  //     / /
+  //    0 0
+  //    0 1
+  //    1 1
+  //    1 0
+  //    0 0
+  //    0 1
+  //
+  // I had two thoughs of processing this:
+  //     - Convert value to binary (decimal) to detect counting up 
+  //       and counting down
+  //     - Prepend the previous new read value to the last read value
+  //       and detect specific states
+  //
+  // Because we are just dealing with a two bit gray code and the
+  // number of possible values are limited to 4 unique states, I
+  // choose the prepend and match state method.
+  //
+  // For reference purposes, this converts the two bit gray code to
+  // binary:
+  //
+  // byte encReadVal = (digitalRead(encPin1)  << 1)| (digitalRead(encPin1) ^ digitalRead(encPin2));
+  //
+  // Start by reading the encoder pin states into a two bit value
+  byte encReadVal = (digitalRead(encPin1)  << 1) | digitalRead(encPin2);
+  // Arm debounce timer on pin change detected AND inactive button send
+  if (!encArmFlag && encReadVal != encLastVal && !encButtonFlag) {
+    encBounceTmr = millis();
+    encArmFlag = true;
+  }
+  // Handle debounce time expiry
+  if (encArmFlag && millis() - encBounceTmr > encBouncePeriod) {
+    // Debounce delay expired, check on state change still true
+    if (encReadVal != encLastVal) {
+      // Detect rotary movement based on gray coding pin read
+      //
+      //   Direction One (call it "up")
+      //        ,- new pin 1
+      //       / ,- new pin 2
+      //      / / ,- last pin 1
+      //     / / / ,- last pin 2
+      //    / / / /
+      //   0 1 0 0
+      //   1 1 0 1
+      //   1 0 1 1
+      //   0 0 1 0
+      //   0 1 0 0 
+      //   1 1 0 1
+      //
+      //   Direction One (call it "down")
+      //        ,- new pin 1
+      //       / ,- new pin 2
+      //      / / ,- last pin 1
+      //     / / / ,- last pin 2
+      //    / / / /
+      //   1 0 0 0
+      //   0 0 0 1
+      //   0 1 1 1
+      //   1 1 1 0
+      //   1 0 0 0 
+      //   0 0 0 1
+      //
+      byte encDirection = (encReadVal << 2 ) | encLastVal;
+      if (debug) { debugEncDirection = encDirection; }
+      if (encDirection == 0b0100 ||
+          encDirection == 0b1101 ||
+          encDirection == 0b1011 ||
+          encDirection == 0b0010 ) {
+        // Going up, activate Joystick button
+        Joystick.setButton(joyEncUp,1);
+        encButtonFlag = 1;                 // 1 = the up button
+        encButtonTmr = millis();
+      } else if (encDirection == 0b1000 ||
+          encDirection == 0b0001 ||
+          encDirection == 0b0111 ||
+          encDirection == 0b1110 ) {
+        // Going down, activate Joystick button
+        Joystick.setButton(joyEncDn,1);
+        encButtonFlag = 2;                 // 2 = the down button
+        encButtonTmr = millis();
+      } else {
+        // Oops an error occured!
+      }
+      // Save new state and disarm
+      encLastVal = encReadVal;
     }
+    // Disarm debounce
+    encArmFlag = false;
   }
-  if (!encLastValUp && encUpReadVal) {
-    // A rose
-    if (encDnReadVal) {
-      // A rise & B high = up
-      encUp();
+  // Handle encoder triggered Joystick button release
+  if (encButtonFlag && millis() - encButtonTmr > encButtonPeriod) {
+    if (encButtonFlag == 1) {
+      // Clear the up button
+      Joystick.setButton(joyEncUp,0);
+    } else if (encButtonFlag == 2) {
+      // Clear the down button
+      Joystick.setButton(joyEncDn,0);
     } else {
-      // A rise & B low = down
-      encDown();      
+    // Oops and error occured!
     }
-  }
-  if (encLastValDn && !encDnReadVal) {
-    // B dropped
-    if (encUpReadVal) {
-      // B drop & A high = up
-      encUp();
-    } else {
-      // B drop & A low = down
-      encDown();      
-    }
-  }
-  if (!encLastValDn && encDnReadVal) {
-    // B rose
-    if (encUpReadVal) {
-      // B rise & A high = down
-      encDown();
-    } else {
-      // B rise & A low = up
-      encUp();      
-    }
-  }
-  encLastValUp = digitalRead(encPinUp);
-  encLastValDn = digitalRead(encPinDn);
-
-  // Release encoder triggered joystick button after timer has lapsed
-  if (encTriggerUp && (millis() - encUpTmr > encTriggerPeriod)) {
-    Joystick.setButton(joyEncUp,0);
-    encTriggerUp = false;
-  }
-  if (encTriggerDn && (millis() - encDnTmr > encTriggerPeriod)) {
-    Joystick.setButton(joyEncDn,0);
-    encTriggerDn = false;
+    // Clear flag as no buttons are pressed any longer
+    encButtonFlag = 0;
   }
 
   // Handle reverse thrust button and debounce
   byte revReadVal = digitalRead(revPin);
-  if (!revTrigger && revReadVal != revLastVal) {
+  if (!revArmFlag && revReadVal != revLastVal) {
     revBounceTmr = millis();
-    revTrigger = true;
+    revArmFlag = true;
   }
-  if (revTrigger && millis() - revBounceTmr > butTriggerPeriod) {
+  if (revArmFlag && millis() - revBounceTmr > butBouncePeriod) {
     // Debounce delay expired, button change was real
     if (revReadVal != revLastVal) {
       // Save new state
@@ -211,19 +266,19 @@ void loop() {
       if (revReadVal) { 
         Joystick.setButton(joyRev,0);
       } else {
-        Joystick.setButton(joyRev,1); 
+        Joystick.setButton(joyRev,1);
       }
     }
-    revTrigger = false;
+    revArmFlag = false;
   }
 
   // Handle gear switch with debounce
   byte gearReadVal = digitalRead(gearPin);
-  if (!gearTrigger && gearReadVal != gearLastVal) {
+  if (!gearArmFlag && gearReadVal != gearLastVal) {
     gearBounceTmr = millis();
-    gearTrigger = true;
+    gearArmFlag = true;
   }
-  if (gearTrigger && millis() - gearBounceTmr > butTriggerPeriod) {
+  if (gearArmFlag && millis() - gearBounceTmr > butBouncePeriod) {
     // Debounce delay expired, switch state changed
     if (gearReadVal != gearLastVal) {
       // Save new state
@@ -236,37 +291,37 @@ void loop() {
       // }
       Joystick.setButton(joyGear,gearLastVal);
     }
-    gearTrigger = false;      
+    gearArmFlag = false;      
   }
 
   // Handle flap switch with debounce
   byte flapReadVal = !digitalRead(flapPin1) + (!digitalRead(flapPin2) << 1);
-  if (!flapTrigger && flapReadVal != flapLastVal) {
+  if (!flapArmFlag && flapReadVal != flapLastVal) {
     flapBounceTmr = millis();
-    flapTrigger = true;
+    flapArmFlag = true;
   }
-  if (flapTrigger && millis() - flapBounceTmr > butTriggerPeriod) {
+  if (flapArmFlag && millis() - flapBounceTmr > butBouncePeriod) {
     // Debounce delay expired, switch state changed
     if (flapReadVal != flapLastVal) {
       // Save new state
       flapLastVal = flapReadVal;
       // Trigger the appropriate button to be pushed
       switch (flapReadVal) {
-        case 2:
+        case 0b10:
           // Clear any old states
           Joystick.setButton(joyFlapTo,0);
           Joystick.setButton(joyFlapLg,0);
           // Set flaps UP
           Joystick.setButton(joyFlapUp,1);
           break;
-        case 0:
+        case 0b00:
           // Clear any old states
           Joystick.setButton(joyFlapUp,0);
           Joystick.setButton(joyFlapLg,0);
           // Set flaps T/O
           Joystick.setButton(joyFlapTo,1);
           break;
-        case 1:
+        case 0b01:
           // Clear any old states
           Joystick.setButton(joyFlapUp,0);
           Joystick.setButton(joyFlapTo,0);
@@ -282,7 +337,7 @@ void loop() {
           break;
       }
     }
-    flapTrigger = false;
+    flapArmFlag = false;
   }
 
 
@@ -290,34 +345,34 @@ void loop() {
   if (debug) {
     if (millis() - debugTmr > debugPeriod) {
       char buffer[80];
-      sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %d  %d Clicks: %u -- Flaps: %u", 
+      sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %u -- Flaps: %u", 
         potLastVal1, potLastVal2, potLastVal3, 
-        encLastValUp, encLastValDn, debugEncClicks, flapReadVal);
+        debugEncDirection, flapReadVal);
       Serial.println(buffer);
       debugTmr = millis();
     }
   }
 }
 
-// Press joystick "up" button in response to encoder input
-void encUp() {
-  if (!encTriggerUp) {
-    Joystick.setButton(joyEncUp,1);
-    encTriggerUp = true;
-    encUpTmr = millis();
-    debugEncClicks++;
-  }
-}
-
-// Press joystick "down" button in response to encoder input
-void encDown() {
-  if (!encTriggerUp) {
-    Joystick.setButton(joyEncDn,1);
-    encTriggerDn = true;
-    encDnTmr = millis();
-    debugEncClicks--;
-  }
-}
+// // Press joystick "up" button in response to encoder input
+// void encUp() {
+//   if (!encArmFlag) {
+//     Joystick.setButton(joyEncUp,1);
+//     encArmFlag = true;
+//     encUpTmr = millis();
+//     debugEncClicks++;
+//   }
+// }
+// 
+// // Press joystick "down" button in response to encoder input
+// void encDown() {
+//   if (!encArmFlag) {
+//     Joystick.setButton(joyEncDn,1);
+//     encArmFlagDn = true;
+//     encDnTmr = millis();
+//     debugEncClicks--;
+//   }
+// }
 
 // We have received non-linear slider pots, this corrects the B5 logarithmic
 // taper to some approximation of linear.
