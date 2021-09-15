@@ -29,17 +29,26 @@
 
 // Conditional build options
 #define ENC_PORT_READ       // How we want the encoder to be read
-#undef SERIAL_DEBUG         // If we want serial debugging 
+#undef  SERIAL_DEBUG        // If we want serial debugging 
 
 // Create Joystick
-Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
-  7, 0,                     // Button count, Hat Switch count
-  false, false, false,      // X, Y, Z axis
-  true, true, false,        // Rx, Ry, Rz rotations
-  false, true,              // Rudder, throttle
-  false, false, false);     // Accelerator, brake, steering
+//
+// Joystick report ID defaults to 0x03 per JOYSTICK_DEFAULT_REPORT_ID
+// Multiple joystick on the same system require unique ID
+// 0x01 and 0x02 are reserved by Arduino for keyboard and mouse libraries
+// See Joystick library docs for more information 
+Joystick_ Joystick(
+  0x05,                        // Joystick report ID 
+  JOYSTICK_TYPE_JOYSTICK,      // Joystick type
+  7, 0,                        // Button count, Hat Switch count
+  false, false, false,         // X, Y, Z axis
+  true, true, false,           // Rx, Ry, Rz rotations
+  false, true,                 // Rudder, throttle
+  false, false, false);        // Accelerator, brake, steering
 
 #ifdef SERIAL_DEBUG
+const unsigned long debugPeriod = 200;
+unsigned long debugTmr = 0;
 byte debugEncDirection = 0;
 #endif
 
@@ -48,12 +57,10 @@ byte debugEncDirection = 0;
 // Note on the Joystick buttons, the encoder rotation triggers a Joystick
 // button press. On my Win10 machine 90ms was the lowest value that
 // appeared to be reliably detect the button inupt signal.
-const unsigned long debugPeriod = 200;
 const unsigned long potBouncePeriod = 200;  // debounce potentiometer read
 const unsigned long encBouncePeriod = 50;   // debounce encoder read
 const unsigned long encButtonPeriod = 90;   // hold and release time for joystick
 const unsigned long butBouncePeriod = 50;   // debounce button read
-unsigned long debugTmr = 0;
 unsigned long pot1Tmr = 0;
 unsigned long pot2Tmr = 0;
 unsigned long pot3Tmr = 0;
@@ -130,7 +137,7 @@ void setup() {
 
   // Initialize serial debugging
   #ifdef SERIAL_DEBUG
-  if (debug) { Serial.begin(9600); }
+  Serial.begin(9600);
   #endif
 }
 
@@ -233,9 +240,8 @@ void loop() {
       //
       byte encDirection = (encReadVal << 2 ) | encLastVal;
       #ifdef SERIAL_DEBUG
-      debugEncDirection = encDirection; }
+      debugEncDirection = encDirection;
       #endif
-
       if (encDirection == 0b0010 ||
           encDirection == 0b0100 ||
           encDirection == 0b1101 ||
@@ -381,9 +387,9 @@ void loop() {
     }
     flapArmFlag = false;
   }
-
-  // Debug printing
+  
 #ifdef SERIAL_DEBUG
+  // Debug printing
   if (millis() - debugTmr > debugPeriod) {
     char buffer[80];
     sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %3u %3u -- Flaps: %4u", 
