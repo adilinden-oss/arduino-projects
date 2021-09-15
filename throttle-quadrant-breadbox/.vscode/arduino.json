@@ -1,0 +1,6 @@
+{
+    "board": "UinoCore:avr:uino32u4",
+    "programmer": "arduino:avrisp",
+    "port": "COM10",
+    "sketch": "throttle-quadrant-breadbox.ino"
+}
