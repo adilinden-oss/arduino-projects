@@ -36,18 +36,18 @@ Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
   false, false, false);     // Accelerator, brake, steering
 
 // Debug mode
-const bool debug = true;   // === IMPORTANT ===
+const bool debug = false;   // === IMPORTANT ===
 byte debugEncDirection = 0;
 
 // Loop timings
 //
 // Note on the Joystick buttons, the encoder rotation triggers a Joystick
-// button press. On my Win10 machine 50ms was the lowest value that
+// button press. On my Win10 machine 90ms was the lowest value that
 // appeared to be reliably detect the button inupt signal.
 const unsigned long debugPeriod = 200;
 const unsigned long potBouncePeriod = 200;  // debounce potentiometer read
-const unsigned long encBouncePeriod = 10;   // debounce encoder read
-const unsigned long encButtonPeriod = 50;   // hold time for joystick button press
+const unsigned long encBouncePeriod = 50;   // debounce encoder read
+const unsigned long encButtonPeriod = 90;   // hold and release time for joystick
 const unsigned long butBouncePeriod = 50;   // debounce button read
 unsigned long debugTmr = 0;
 unsigned long pot1Tmr = 0;
@@ -67,7 +67,6 @@ const byte encPin1 = 9;     // rotary encoder input 1 for elevator trim
 const byte encPin2 = 10;    // rotary encoder input 2 for elevator trim
 #define encPort PINB        // rotary encoder port useed - both pins!
 const byte encShift = 5;    // number of positions to shift right
-const byte encMask = 0b01100000;
 const byte revPin = 4;      // reverse thrust input
 const byte gearPin = 5;     // gear lever input
 const byte flapPin1 = 6;    // flaps input 1
@@ -148,8 +147,8 @@ void loop() {
   // Handle elevator trim rotary encoder
   //
   // The two bit gray code from the encoder looks as follows:
-  //       ,- pin1
-  //      / ,- pin 2
+  //       ,- pin 2
+  //      / ,- pin 1
   //     / /
   //    0 0
   //    0 1
@@ -161,8 +160,8 @@ void loop() {
   // I had two thoughs of processing this:
   //     - Convert value to binary (decimal) to detect counting up 
   //       and counting down
-  //     - Prepend the previous new read value to the last read value
-  //       and detect specific states
+  //     - Prepend the new read value to the last read value and
+  //       detect specific states
   //
   // Because we are just dealing with a two bit gray code and the
   // number of possible values are limited to 4 unique states, I
@@ -170,20 +169,20 @@ void loop() {
   //
   // For reference purposes, this converts the two bit gray code to
   // binary:
-  //    byte encReadVal = (digitalRead(encPin1)  << 1)| (digitalRead(encPin1) ^ digitalRead(encPin2));
+  //    byte encReadVal = (digitalRead(encPin2)  << 1)| (digitalRead(encPin2) ^ digitalRead(encPin1));
   //
   // Start by reading the encoder pin states into a two bit value
   //
   // Read each pin using digitalRead:
-  //    byte encReadVal = (digitalRead(encPin1)  << 1) | digitalRead(encPin2);
+  //    byte encReadVal = (digitalRead(encPin2)  << 1) | digitalRead(encPin1);
   //
   // Read port and extract pin values. REQUIRES that both pins are adjacent
   // on the same port. I.e. on Arduino Leonardo and *uino32u4 this would be
   // D9 & D19 for PB5 & PB6 respectively.
-  byte encReadVal = (encPort & encMask) >> encShift;
+  byte encReadVal = (encPort >> encShift) & 0b00000011;
 
   // Arm debounce timer on pin change detected AND inactive button send
-  if (!encArmFlag && encReadVal != encLastVal && !encButtonFlag) {
+  if (!encArmFlag && encReadVal != encLastVal) {
     encBounceTmr = millis();
     encArmFlag = true;
   }
@@ -194,50 +193,54 @@ void loop() {
       // Detect rotary movement based on gray coding pin read
       //
       //   Direction One (call it "up")
-      //        ,- new pin 1
-      //       / ,- new pin 2
-      //      / / ,- last pin 1
-      //     / / / ,- last pin 2
+      //        ,- new pin 2
+      //       / ,- new pin 1
+      //      / / ,- last pin 2
+      //     / / / ,- last pin 1
       //    / / / /
+      //   0 0 1 0
       //   0 1 0 0
       //   1 1 0 1
       //   1 0 1 1
-      //   0 0 1 0
-      //   0 1 0 0 
-      //   1 1 0 1
+      //   0 0 1 0 
+      //   0 1 0 0
       //
       //   Direction One (call it "down")
-      //        ,- new pin 1
-      //       / ,- new pin 2
-      //      / / ,- last pin 1
-      //     / / / ,- last pin 2
+      //        ,- new pin 2
+      //       / ,- new pin 1
+      //      / / ,- last pin 2
+      //     / / / ,- last pin 1
       //    / / / /
-      //   0 0 0 1
       //   1 0 0 0
       //   1 1 1 0
-      //   1 0 0 1
+      //   0 1 1 1
       //   0 0 0 1
       //   1 0 0 0 
-      //   0 1 1 0      
+      //   1 1 1 0      
       //
       byte encDirection = (encReadVal << 2 ) | encLastVal;
       if (debug) { debugEncDirection = encDirection; }
-      if (encDirection == 0b0100 ||
+      if (encDirection == 0b0010 ||
+          encDirection == 0b0100 ||
           encDirection == 0b1101 ||
-          encDirection == 0b1011 ||
-          encDirection == 0b0010 ) {
+          encDirection == 0b1011 ) {
         // Going up, activate Joystick button
-        Joystick.setButton(joyEncUp,1);
-        encButtonFlag = 1;                 // 1 = the up button
-        encButtonTmr = millis();
-      } else if (encDirection == 0b1000 ||
-          encDirection == 0b0001 ||
+        if (!encButtonFlag) {
+          Joystick.setButton(joyEncUp,1);
+          encButtonFlag = 1;               // 1 = the up button
+          encButtonTmr = millis();
+        }
+      } else
+      if (encDirection == 0b1000 ||
+          encDirection == 0b1110 ||
           encDirection == 0b0111 ||
-          encDirection == 0b1110 ) {
-        // Going down, activate Joystick button
-        Joystick.setButton(joyEncDn,1);
-        encButtonFlag = 2;                 // 2 = the down button
-        encButtonTmr = millis();
+          encDirection == 0b0001 ) {
+        // Going down
+        if (!encButtonFlag) {
+          Joystick.setButton(joyEncDn,1);
+          encButtonFlag = 2;               // 2 = the down button
+          encButtonTmr = millis();
+        }
       } else {
         // Oops an error occured!
       }
@@ -250,13 +253,25 @@ void loop() {
   // Handle encoder triggered Joystick button release
   if (encButtonFlag && millis() - encButtonTmr > encButtonPeriod) {
     if (encButtonFlag == 1) {
-      // Clear the up button
+      // Clear the up button and 
+      // set release flag and
+      // reset the button timer
       Joystick.setButton(joyEncUp,0);
+      encButtonFlag = 9;
+      encButtonTmr = millis();
     } else if (encButtonFlag == 2) {
-      // Clear the down button
+      // Clear the up button and 
+      // set release flag and
+      // reset the button timer
       Joystick.setButton(joyEncDn,0);
+      encButtonFlag = 9;
+      encButtonTmr = millis();
+    } else if (encButtonFlag == 9) {
+      // Clear the button flag
+      encButtonFlag = 0;
     } else {
-    // Oops and error occured!
+      // Oops and error occured!
+      encButtonFlag = 0;
     }
     // Clear flag as no buttons are pressed any longer
     encButtonFlag = 0;
