@@ -33,7 +33,7 @@
 
 // Create Joystick
 Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
-  8, 0,                     // Button count, Hat Switch count
+  7, 0,                     // Button count, Hat Switch count
   false, false, false,      // X, Y, Z axis
   true, true, false,        // Rx, Ry, Rz rotations
   false, true,              // Rudder, throttle
