@@ -36,22 +36,30 @@ Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
   false, false, false);     // Accelerator, brake, steering
 
 // Debug mode
-const bool debug = false;          // === IMPORTANT ===
+const bool debug = false;   // === IMPORTANT ===
 unsigned int debugEncClicks = 0;
 
 // Loop timings
 const unsigned long debugPeriod = 200;
-const unsigned long encTriggerPeriod = 100;
+const unsigned long potTriggerPeriod = 75; // timer pot reading
+const unsigned long encTriggerPeriod = 50; // timer button is "pressed"
 unsigned long debugTimer = 0;
+unsigned long pot1Timer = 0;
+unsigned long pot2Timer = 0;
+unsigned long pot3Timer = 0;
 unsigned long encUpTimer = 0;
-unsigned long encDownTimer = 0;
+unsigned long encDnTimer = 0;
 
-// HW pin used
-const int potPin1 = A0;    // select the input pin for the potentiometer
-const int potPin2 = A1;    // select the input pin for the potentiometer
-const int potPin3 = A2;    // select the input pin for the potentiometer
-const int encPinA = A4;
-const int encPinB = A5;
+// Arduino HW pin used
+const int potPin1 = A0;  // select the input pin for the potentiometer
+const int potPin2 = A1;  // select the input pin for the potentiometer
+const int potPin3 = A2;  // select the input pin for the potentiometer
+const int encPinUp = 2;
+const int encPinDn = 3;
+
+// Joystick button assignment
+const int joyEncUp = 0;
+const int joyEncDn = 1;
 
 // Pot values
 int potLastVal1 = 0;
@@ -59,18 +67,18 @@ int potLastVal2 = 0;
 int potLastVal3 = 0;
 
 // Rotary encoder values
-int encLastValA = 0;
-int encLastValB = 0;
-bool encTriggerUp = false;    // encoder triggered up
-bool encTriggerDown = false;  // encoder triggered up
+int encLastValUp = 0;
+int encLastValDn = 0;
+bool encTriggerUp = false;  // encoder triggered up
+bool encTriggerDn = false;  // encoder triggered up
 
 void setup() {
   // Pins
   pinMode(potPin1, INPUT);
   pinMode(potPin2, INPUT);
   pinMode(potPin3, INPUT);
-  pinMode(encPinA, INPUT);
-  pinMode(encPinB, INPUT);
+  pinMode(encPinUp, INPUT);
+  pinMode(encPinDn, INPUT);
 
   // Joystick
   Joystick.setThrottleRange(0, 1023);
@@ -87,29 +95,30 @@ void loop() {
   // Handle pots
   int readSensor = 0;
 
+  // Read and update potentiometers periodically
   readSensor = correctTaper(analogRead(potPin1));
-  if (readSensor != potLastVal1) {
+  if (readSensor != potLastVal1 && (millis() - pot1Timer > potTriggerPeriod)) {
     Joystick.setThrottle(readSensor);
     potLastVal1 = readSensor;
   }
   readSensor = correctTaper(analogRead(potPin2));
-  if (readSensor != potLastVal2) {
+  if (readSensor != potLastVal2 && (millis() - pot2Timer > potTriggerPeriod)) {
     Joystick.setRxAxis(readSensor);
     potLastVal2 = readSensor;
   }
   readSensor = correctTaper(analogRead(potPin3));
-  if (readSensor != potLastVal3) {
+  if (readSensor != potLastVal3 && (millis() - pot3Timer > potTriggerPeriod)) {
     Joystick.setRyAxis(readSensor);
     potLastVal3 = readSensor;
   }
 
   // Handle encoder
-  int readEncA = digitalRead(encPinA);
-  int readEncB = digitalRead(encPinB);
+  int readEncUp = digitalRead(encPinUp);
+  int readEncDn = digitalRead(encPinDn);
 
-  if (encLastValA && !readEncA) {
+  if (encLastValUp && !readEncUp) {
     // A dropped
-    if (readEncB) {
+    if (readEncDn) {
       // A drop & B high = down
       encDown();
     } else {
@@ -117,9 +126,9 @@ void loop() {
       encUp();      
     }
   }
-  if (!encLastValA && readEncA) {
+  if (!encLastValUp && readEncUp) {
     // A rose
-    if (readEncB) {
+    if (readEncDn) {
       // A rise & B high = up
       encUp();
     } else {
@@ -127,9 +136,9 @@ void loop() {
       encDown();      
     }
   }
-  if (encLastValB && !readEncB) {
+  if (encLastValDn && !readEncDn) {
     // B dropped
-    if (readEncA) {
+    if (readEncUp) {
       // B drop & A high = up
       encUp();
     } else {
@@ -137,9 +146,9 @@ void loop() {
       encDown();      
     }
   }
-  if (!encLastValB && readEncB) {
+  if (!encLastValDn && readEncDn) {
     // B rose
-    if (readEncA) {
+    if (readEncUp) {
       // B rise & A high = down
       encDown();
     } else {
@@ -147,16 +156,17 @@ void loop() {
       encUp();      
     }
   }
-  encLastValA = digitalRead(encPinA);
-  encLastValB = digitalRead(encPinB);
+  encLastValUp = digitalRead(encPinUp);
+  encLastValDn = digitalRead(encPinDn);
 
+  // Release joystick button after timer has lapsed
   if (encTriggerUp && (millis() - encUpTimer > encTriggerPeriod)) {
-    Joystick.setButton(0,0);
+    Joystick.setButton(joyEncUp,0);
     encTriggerUp = false;
   }
-  if (encTriggerDown && (millis() - encDownTimer > encTriggerPeriod)) {
-    Joystick.setButton(1,0);
-    encTriggerDown = false;
+  if (encTriggerDn && (millis() - encDnTimer > encTriggerPeriod)) {
+    Joystick.setButton(joyEncDn,0);
+    encTriggerDn = false;
   }
 
   // Debug printing
@@ -165,35 +175,35 @@ void loop() {
       char buffer[60];
       sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %d  %d Clicks: %u", 
         potLastVal1, potLastVal2, potLastVal3, 
-        encLastValA, encLastValB, debugEncClicks);
+        encLastValUp, encLastValDn, debugEncClicks);
       Serial.println(buffer);
       debugTimer = millis();
     }
   }
-
-  delay(5);
 }
 
+// Press joystick "up" button in response to encoder input
 void encUp() {
   if (!encTriggerUp) {
-    Joystick.setButton(0,1);
+    Joystick.setButton(joyEncUp,1);
     encTriggerUp = true;
     encUpTimer = millis();
     debugEncClicks++;
   }
 }
 
+// Press joystick "down" button in response to encoder input
 void encDown() {
   if (!encTriggerUp) {
-    Joystick.setButton(1,1);
-    encTriggerDown = true;
-    encDownTimer = millis();
+    Joystick.setButton(joyEncDn,1);
+    encTriggerDn = true;
+    encDnTimer = millis();
     debugEncClicks--;
   }
 }
 
-// We have shitty pots, this corrects the B5 logarithmic taper to some
-// approimation of linear.
+// We have received non-linear slider pots, this corrects the B5 logarithmic
+// taper to some approximation of linear.
 int correctTaper(int in) {
   int out;
   
