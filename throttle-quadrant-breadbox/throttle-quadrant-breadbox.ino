@@ -36,41 +36,39 @@ Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, JOYSTICK_TYPE_JOYSTICK,
   false, false, false);     // Accelerator, brake, steering
 
 // Debug mode
-bool debug = true;          // === IMPORTANT ===
+const bool debug = false;          // === IMPORTANT ===
 unsigned int debugEncClicks = 0;
 
 // Loop timings
 const unsigned long debugPeriod = 200;
-const unsigned long pressPeriod = 100;
+const unsigned long encTriggerPeriod = 100;
 unsigned long debugTimer = 0;
-unsigned long buttonUpTimer = 0;
-unsigned long buttonDownTimer = 0;
+unsigned long encUpTimer = 0;
+unsigned long encDownTimer = 0;
 
 // HW pin used
-const int sensorPin1 = A0;    // select the input pin for the potentiometer
-const int sensorPin2 = A1;    // select the input pin for the potentiometer
-const int sensorPin3 = A2;    // select the input pin for the potentiometer
+const int potPin1 = A0;    // select the input pin for the potentiometer
+const int potPin2 = A1;    // select the input pin for the potentiometer
+const int potPin3 = A2;    // select the input pin for the potentiometer
 const int encPinA = A4;
 const int encPinB = A5;
 
 // Pot values
-int lastSensorVal1 = 0;
-int lastSensorVal2 = 0;
-int lastSensorVal3 = 0;
+int potLastVal1 = 0;
+int potLastVal2 = 0;
+int potLastVal3 = 0;
 
 // Rotary encoder values
-int lastEncValA = 0;
-int lastEncValB = 0;
-
-// Button press
-bool isPressedUp = false;
-bool isPressedDown = false;
+int encLastValA = 0;
+int encLastValB = 0;
+bool encTriggerUp = false;    // encoder triggered up
+bool encTriggerDown = false;  // encoder triggered up
 
 void setup() {
   // Pins
-  pinMode(sensorPin1, INPUT);
-  pinMode(sensorPin2, INPUT);
-  pinMode(sensorPin3, INPUT);
+  pinMode(potPin1, INPUT);
+  pinMode(potPin2, INPUT);
+  pinMode(potPin3, INPUT);
   pinMode(encPinA, INPUT);
   pinMode(encPinB, INPUT);
 
@@ -89,76 +87,76 @@ void loop() {
   // Handle pots
   int readSensor = 0;
 
-  readSensor = correctTaper(analogRead(sensorPin1));
-  if (readSensor != lastSensorVal1) {
+  readSensor = correctTaper(analogRead(potPin1));
+  if (readSensor != potLastVal1) {
     Joystick.setThrottle(readSensor);
-    lastSensorVal1 = readSensor;
+    potLastVal1 = readSensor;
   }
-  readSensor = correctTaper(analogRead(sensorPin2));
-  if (readSensor != lastSensorVal2) {
+  readSensor = correctTaper(analogRead(potPin2));
+  if (readSensor != potLastVal2) {
     Joystick.setRxAxis(readSensor);
-    lastSensorVal2 = readSensor;
+    potLastVal2 = readSensor;
   }
-  readSensor = correctTaper(analogRead(sensorPin3));
-  if (readSensor != lastSensorVal3) {
+  readSensor = correctTaper(analogRead(potPin3));
+  if (readSensor != potLastVal3) {
     Joystick.setRyAxis(readSensor);
-    lastSensorVal3 = readSensor;
+    potLastVal3 = readSensor;
   }
 
   // Handle encoder
   int readEncA = digitalRead(encPinA);
   int readEncB = digitalRead(encPinB);
 
-  if (lastEncValA && !readEncA) {
+  if (encLastValA && !readEncA) {
     // A dropped
     if (readEncB) {
       // A drop & B high = down
-      buttonDown();
+      encDown();
     } else {
       // A drop & B low = up
-      buttonUp();      
+      encUp();      
     }
   }
-  if (!lastEncValA && readEncA) {
+  if (!encLastValA && readEncA) {
     // A rose
     if (readEncB) {
       // A rise & B high = up
-      buttonUp();
+      encUp();
     } else {
       // A rise & B low = down
-      buttonDown();      
+      encDown();      
     }
   }
-  if (lastEncValB && !readEncB) {
+  if (encLastValB && !readEncB) {
     // B dropped
     if (readEncA) {
       // B drop & A high = up
-      buttonUp();
+      encUp();
     } else {
       // B drop & A low = down
-      buttonDown();      
+      encDown();      
     }
   }
-  if (!lastEncValB && readEncB) {
+  if (!encLastValB && readEncB) {
     // B rose
     if (readEncA) {
       // B rise & A high = down
-      buttonDown();
+      encDown();
     } else {
       // B rise & A low = up
-      buttonUp();      
+      encUp();      
     }
   }
-  lastEncValA = digitalRead(encPinA);
-  lastEncValB = digitalRead(encPinB);
+  encLastValA = digitalRead(encPinA);
+  encLastValB = digitalRead(encPinB);
 
-  if (isPressedUp && (millis() - buttonUpTimer > pressPeriod)) {
+  if (encTriggerUp && (millis() - encUpTimer > encTriggerPeriod)) {
     Joystick.setButton(0,0);
-    isPressedUp = false;
+    encTriggerUp = false;
   }
-  if (isPressedDown && (millis() - buttonDownTimer > pressPeriod)) {
+  if (encTriggerDown && (millis() - encDownTimer > encTriggerPeriod)) {
     Joystick.setButton(1,0);
-    isPressedDown = false;
+    encTriggerDown = false;
   }
 
   // Debug printing
@@ -166,8 +164,8 @@ void loop() {
     if (millis() - debugTimer > debugPeriod) {
       char buffer[60];
       sprintf(buffer, "Debug: Pots: %4d  %4d  %4d -- Enc: %d  %d Clicks: %u", 
-        lastSensorVal1, lastSensorVal2, lastSensorVal3, 
-        lastEncValA, lastEncValB, debugEncClicks);
+        potLastVal1, potLastVal2, potLastVal3, 
+        encLastValA, encLastValB, debugEncClicks);
       Serial.println(buffer);
       debugTimer = millis();
     }
@@ -176,20 +174,20 @@ void loop() {
   delay(5);
 }
 
-void buttonUp() {
-  if (!isPressedUp) {
+void encUp() {
+  if (!encTriggerUp) {
     Joystick.setButton(0,1);
-    isPressedUp = true;
-    buttonUpTimer = millis();
+    encTriggerUp = true;
+    encUpTimer = millis();
     debugEncClicks++;
   }
 }
 
-void buttonDown() {
-  if (!isPressedUp) {
+void encDown() {
+  if (!encTriggerUp) {
     Joystick.setButton(1,1);
-    isPressedDown = true;
-    buttonDownTimer = millis();
+    encTriggerDown = true;
+    encDownTimer = millis();
     debugEncClicks--;
   }
 }
