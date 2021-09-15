@@ -55,11 +55,11 @@ byte debugEncDirection = 0;
 // Loop timings
 //
 // Note on the Joystick buttons, the encoder rotation triggers a Joystick
-// button press. On my Win10 machine 90ms was the lowest value that
+// button press. On my Win10 machine 100ms was about the lowest value that
 // appeared to be reliably detect the button inupt signal.
 const unsigned long potBouncePeriod = 200;  // debounce potentiometer read
-const unsigned long encBouncePeriod = 50;   // debounce encoder read
-const unsigned long encButtonPeriod = 90;   // hold and release time for joystick
+const unsigned long encBouncePeriod = 10;   // debounce encoder read
+const unsigned long encButtonPeriod = 100;  // hold and release time for joystick
 const unsigned long butBouncePeriod = 50;   // debounce button read
 unsigned long pot1Tmr = 0;
 unsigned long pot2Tmr = 0;
@@ -295,8 +295,6 @@ void loop() {
       // Oops and error occured!
       encButtonFlag = 0;
     }
-    // Clear flag as no buttons are pressed any longer
-    encButtonFlag = 0;
   }
 
   // Handle reverse thrust button and debounce
