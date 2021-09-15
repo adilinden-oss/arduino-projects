@@ -63,8 +63,8 @@ unsigned long flapBounceTmr = 0;
 const byte potPin1 = A0;  // input pin for the potentiometer
 const byte potPin2 = A1;  // input pin for the potentiometer
 const byte potPin3 = A2;  // input pin for the potentiometer
-const byte encPin1 = 2;   // rotary encoder input 1 for elevator trim
-const byte encPin2 = 3;   // rotary encoder input 2 for elevator trim
+const byte encPin1 = 9;   // rotary encoder input 1 for elevator trim
+const byte encPin2 = 10;  // rotary encoder input 2 for elevator trim
 const byte revPin = 4;    // reverse thrust input
 const byte gearPin = 5;   // gear lever input
 const byte flapPin1 = 6;  // flaps input 1
@@ -171,6 +171,7 @@ void loop() {
   // byte encReadVal = (digitalRead(encPin1)  << 1)| (digitalRead(encPin1) ^ digitalRead(encPin2));
   //
   // Start by reading the encoder pin states into a two bit value
+  // Note: Is there a better way to read both bits at once?
   byte encReadVal = (digitalRead(encPin1)  << 1) | digitalRead(encPin2);
   // Arm debounce timer on pin change detected AND inactive button send
   if (!encArmFlag && encReadVal != encLastVal && !encButtonFlag) {
