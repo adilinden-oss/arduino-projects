@@ -310,12 +310,8 @@ void loop() {
     if (revReadVal != revLastVal) {
       // Save new state
       revLastVal = revReadVal;
-      // Joystick button inverted to pin change
-      if (revReadVal) { 
-        Joystick.setButton(joyRev,0);
-      } else {
-        Joystick.setButton(joyRev,1);
-      }
+      // Joystick button inverted, pressed button is gear up
+      Joystick.setButton(joyRev,!revReadVal);
     }
     revArmFlag = false;
   }
@@ -331,13 +327,8 @@ void loop() {
     if (gearReadVal != gearLastVal) {
       // Save new state
       gearLastVal = gearReadVal;
-      // Joystick button follows pin change
-      // if (gearReadVal) { 
-      //   Joystick.setButton(joyGear,1);
-      // } else {
-      //   Joystick.setButton(joyGear,0); 
-      // }
-      Joystick.setButton(joyGear,gearLastVal);
+      // Joystick button inverted, pressed button is gear up
+      Joystick.setButton(joyGear,!gearReadVal);
     }
     gearArmFlag = false;      
   }
