@@ -1,7 +1,7 @@
 {
     "board": "UinoCore:avr:uino32u4",
     "programmer": "arduino:avrisp",
-    "port": "COM11",
+    "port": "COM12",
     "sketch": "throttle-quadrant-breadbox.ino",
     "output": "../build_dir"
 }

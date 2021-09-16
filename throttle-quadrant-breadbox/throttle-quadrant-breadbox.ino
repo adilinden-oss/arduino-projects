@@ -40,7 +40,7 @@
 Joystick_ Joystick(
   0x05,                        // Joystick report ID 
   JOYSTICK_TYPE_JOYSTICK,      // Joystick type
-  7, 0,                        // Button count, Hat Switch count
+  8, 0,                        // Button count, Hat Switch count
   false, false, false,         // X, Y, Z axis
   true, true, false,           // Rx, Ry, Rz rotations
   false, true,                 // Rudder, throttle
@@ -92,10 +92,11 @@ const byte encPin2 = 10;    // rotary encoder input 2 for elevator trim
 const byte joyEncUp = 0;
 const byte joyEncDn = 1;
 const byte joyRev = 2;
-const byte joyGear = 3;
-const byte joyFlapUp = 4;
-const byte joyFlapTo = 5;
-const byte joyFlapLg = 6;
+const byte joyGearUp = 3;
+const byte joyGearDn = 4;
+const byte joyFlapUp = 5;
+const byte joyFlapTo = 6;
+const byte joyFlapLg = 7;
 
 // Pot values
 int potLastVal1 = 2048;
@@ -325,8 +326,19 @@ void loop() {
     if (gearReadVal != gearLastVal) {
       // Save new state
       gearLastVal = gearReadVal;
-      // Joystick button inverted, pressed button is gear up
-      Joystick.setButton(joyGear,!gearReadVal);
+      // Due to a MSFS 2020 bug regarding the "Set Gear (0,1)" binding
+      // this workaround is needed, where a dedicated up and down button
+      // are used instead of a toggle button.
+      //
+      // // Joystick button inverted, pressed button is gear up
+      // Joystick.setButton(joyGear,!gearReadVal);
+      if (!gearReadVal) {
+        Joystick.setButton(joyGearDn,0);
+        Joystick.setButton(joyGearUp,1);
+      } else {
+        Joystick.setButton(joyGearUp,0);
+        Joystick.setButton(joyGearDn,1);
+      }
     }
     gearArmFlag = false;      
   }
